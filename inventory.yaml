@@ -1,0 +1,62 @@
+all:
+  hosts:
+    elastic-coordinating01.example.local:
+      ansible_host: 10.130.32.91
+      elastic_ip_address: 10.130.32.91
+      elasticsearch_jvm_xms: 4g 
+      elasticsearch_jvm_xmx: 4g
+    elastic-coordinating02.example.local:
+      ansible_host: 10.130.32.92
+      elastic_ip_address: 10.130.32.92
+      elasticsearch_jvm_xms: 4g 
+      elasticsearch_jvm_xmx: 4g
+    elastic-master01.example.local:
+      ansible_host: 10.130.32.93
+      elastic_ip_address: 10.130.32.93
+      elasticsearch_jvm_xms: 4g 
+      elasticsearch_jvm_xmx: 4g
+    elastic-master02.example.local:
+      ansible_host: 10.130.32.94
+      elastic_ip_address: 10.130.32.94
+      elasticsearch_jvm_xms: 4g 
+      elasticsearch_jvm_xmx: 4g
+    elastic-master03.example.local:
+      ansible_host: 10.130.32.95
+      elastic_ip_address: 10.130.32.95
+      elasticsearch_jvm_xms: 4g 
+      elasticsearch_jvm_xmx: 4g
+    elastic-data01.example.local:
+      ansible_host: 10.130.32.96
+      elastic_ip_address: 10.130.32.96
+      elasticsearch_jvm_xms: 4g 
+      elasticsearch_jvm_xmx: 4g
+    elastic-data02.example.local:
+      ansible_host: 10.130.32.97
+      elastic_ip_address: 10.130.32.97
+      elasticsearch_jvm_xms: 4g 
+      elasticsearch_jvm_xmx: 4g
+  children:
+    elasticsearch_coordinating:
+      hosts:
+        elastic-coordinating01.example.local:
+        elastic-coordinating02.example.local:
+    elasticsearch_master:
+      hosts:
+        elastic-master01.example.local:
+        elastic-master02.example.local:
+        elastic-master03.example.local:
+    elasticsearch_data:
+      hosts:
+        elastic-data01.example.local:
+        elastic-data02.example.local:
+    kibana:
+      hosts:
+        elastic-master01.example.local:
+    elasticsearch:
+      children:
+        elasticsearch_coordinating:
+        elasticsearch_master:
+        elasticsearch_data:
+    nginx:
+      hosts:
+        elastic-master01.example.local:
