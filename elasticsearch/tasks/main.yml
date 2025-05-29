@@ -1,0 +1,37 @@
+---
+# Pre-installation tasks
+- include_tasks: 
+    file: preinstall.yml
+    apply:
+      tags:
+        - elasticsearch
+        - preinstall
+
+# Install required Java version
+- include_tasks: 
+    file: install_java.yml
+    apply:
+      tags:
+        - elasticsearch
+        - java
+
+# Install and configure Elasticsearch
+- include_tasks: 
+    file: install_elasticsearch.yml
+    apply:
+      tags:
+        - elasticsearch
+        - install
+
+# Print version information and configuration summary
+- name: Print Elasticsearch version and configuration
+  debug:
+    msg:
+      - "Elasticsearch version: {{ elasticsearch_version }}"
+      - "Major version: {{ elasticsearch_major_version }}"
+      - "OS family: {{ elasticsearch_os_family }}"
+      - "Security enabled: {{ elasticsearch_security_enabled }}"
+      - "Vault integration: {{ elasticsearch_use_vault }}"
+  tags:
+    - elasticsearch
+    - info

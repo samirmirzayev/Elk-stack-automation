@@ -1,0 +1,209 @@
+---
+- name: Update the /etc/hosts file with node names
+  lineinfile:
+    dest: /etc/hosts
+    regexp: '.*{{ item }}$'
+    line: "{{ hostvars[item].ansible_host }} {{item}}"
+    state: present
+  when: 
+    - hostvars[item].ansible_host is defined
+    - "'efk' in groups"
+    - inventory_hostname in groups["efk"]
+  loop: "{{ groups.all }}"
+
+- name: Update package list
+  package_facts:
+    manager: apt
+  
+- set_fact:
+    kibana_virtual_proto: "{{ 'https' if kibana_https_enabled else 'http' }}"
+    kibana_current_version: "{{ ansible_facts.packages['kibana'] | default(none)  |  map(attribute='version')  |  list }}"
+
+- name: disable ufw
+  systemd:
+    name: ufw 
+    state: stopped 
+    enabled: no
+  when: 
+    - kibana_disable_firewall
+
+- name: add efk group 
+  group:
+    name: "{{ kibana_group }}"
+    state: present
+
+- name: add efk user
+  user:
+    name: "{{ kibana_user }}"
+    shell: /bin/sh
+    password: "*"
+    group: "{{ kibana_group }}"
+
+- name: Add Kibana GPG key
+  apt_key:
+    url: "{{ kibana_gpg_key_url }}"
+    state: present
+
+- name: Install utils
+  apt:
+    name: "{{ item }}"
+    state: present
+    force_apt_get: yes
+  loop: "{{ kibana_packages }}"
+
+- name: Add Kibana repo
+  apt_repository:
+    filename: "{{ kibana_repo_file_name }}"
+    repo: "{{ kibana_repo }}"
+    state: present
+    update_cache: yes
+
+- name: Check curret version kibana
+  debug:
+    var: kibana_current_version
+
+- name: Check inventar version kibana
+  debug:
+    var: kibana_version
+
+- name: Install Kibana
+  apt:
+    name: kibana={{ kibana_version }}
+    state: present
+    force_apt_get: yes
+    force: yes
+  when: kibana_version not in kibana_current_version
+  notify:
+    - restart kibana
+
+- name: Reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: Verify log directory
+  file: 
+    path: "{{ kibana_log_dir }}"
+    state: directory
+    owner: "{{ kibana_user }}"
+    group: "{{ kibana_group }}"
+
+- name: Verify data directory
+  file:
+    path: "{{ kibana_data_dir }}"
+    state: directory
+    owner: "{{ kibana_user }}"
+    group: "{{ kibana_group }}"
+
+- name: Verify cert dir
+  file:
+    path: "{{ kibana_certs_dir }}"
+    state: directory
+    owner: "{{ kibana_user }}"
+    group: "{{ kibana_group }}"
+    mode: 0700
+
+- name: Fix directory permission
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ kibana_user }}"
+    group: "{{ kibana_group }}"
+    recurse: yes
+    mode: u=rwX,g=rX,o-rwx
+  loop:
+    - "{{ kibana_conf_dir }}"
+    - "{{ kibana_certs_dir}}"
+    - "{{ kibana_pid_dir}}"
+    - "{{ kibana_data_dir }}"
+    - "{{ kibana_log_dir }}"
+
+- name: Fetch stored secrets from Vault
+  set_fact:
+    stored_secrets: "{{ lookup('community.hashi_vault.hashi_vault', 'secret=' + vault_path + ' token=' + vault_token + ' url=' + vault_addr + ' validate_certs=no') }}"
+  failed_when: false
+  ignore_errors: yes
+
+- name: Set elasticsearch superuser credentials
+  set_fact:
+    elasticsearch_kibana_system:
+      username: "kibana_system"
+      password: "{{ stored_secrets.CI_KIBANA_SYSTEM }}"
+
+
+- name: Deploy Kibana service file from template
+  template:
+    src: kibana-service.yml.j2
+    dest: "/lib/systemd/system/kibana.service"
+    owner: root
+    group: root
+    mode: 0644
+
+- name: Reload systemd to apply service changes
+  command: systemctl daemon-reload
+
+- name: Render kibana configuration file
+  template:
+    src: kibana.yml.j2
+    dest: "{{ kibana_conf_dir }}/kibana.yml"
+    owner: "{{ kibana_user }}"
+    group: "{{ kibana_group }}"
+    mode: 0644
+  notify:
+    - restart kibana
+
+- name: Render node.options file
+  template:
+    src: node.options.j2
+    dest: "{{ kibana_conf_dir }}/node.options"
+    owner: "{{ kibana_user }}"
+    group: "{{ kibana_group }}"
+    mode: 0644
+  notify:
+    - restart kibana
+    
+- name: Copy ssl .pem file
+  copy:
+    src: "{{ elasticsearch_certs_dir }}/{{ dns_names[0] }}.pem"
+    dest: "{{ kibana_certs_dir }}/{{ dns_names[0] }}.pem"
+    owner: "{{ kibana_user }}"
+    group: "{{ kibana_group }}"
+    mode: 0700
+    remote_src: yes
+  when: elasticsearch_https_enabled
+
+- name: Copy ssl .key file
+  copy:
+    src: "{{ elasticsearch_certs_dir }}/{{ dns_names[0] }}.key"
+    dest: "{{ kibana_certs_dir }}/{{ dns_names[0] }}.key"
+    owner: "{{ kibana_user }}"
+    group: "{{ kibana_group }}"
+    mode: 0700
+    remote_src: yes
+  when: elasticsearch_https_enabled
+
+- name: Add Root CA cert
+  template:
+    src: ROOTCA.pem
+    dest: "{{ kibana_certs_dir }}/ROOTCA.pem"
+    owner: "{{ kibana_user }}"
+    group: "{{ kibana_group }}"
+    mode: 0644
+
+
+- name: enable and start kibana
+  systemd:
+    name: "{{ kibana_service }}" 
+    state: restarted 
+    enabled: yes
+
+- name: wait kibana to be ready with all redirects
+  uri:
+    url: "{{ kibana_virtual_proto }}://{{ dns_names[0] }}:5601"
+    status_code: 200
+    follow_redirects: all  # Tüm yönlendirmeleri takip et
+    validate_certs: no
+  register: result
+  until: result.status == 200
+  retries: 5
+  delay: 20
+  run_once: true

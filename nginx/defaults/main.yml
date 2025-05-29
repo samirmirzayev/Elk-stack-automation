@@ -1,0 +1,32 @@
+---
+# vault variables
+vault_token: "{{ lookup('env', 'VAULT_TOKEN') | default('') }}"
+vault_addr: "{{ lookup('env', 'VAULT_ADDR') | default('') }}"
+vault_path: "{{ lookup('env', 'VAULT_PATH') | default('') }}"
+vault_validate_certs: "{{ lookup('env', 'VAULT_SKIP_VERIFY') | default('no') }}"
+
+# defaults file for nginx
+nginx_version: "1.28.0"
+nginx_proxy_pass_ip: ""
+nginx_proxy_pass_port: ""
+nginx_certs_path: /etc/nginx/certs
+nginx_conf_dir: /etc/nginx/conf.d
+nginx_dns_name: ""
+nginx_crt_filename: ""
+nginx_key_filename: ""
+
+# SSL certificate settings
+ssl_certificate_country: "AZ"
+ssl_certificate_state: "BAKU"
+ssl_certificate_locality: "BAKU"
+ssl_certificate_organization: "IT"
+ssl_certificate_organizational_unit: "IT Department"
+ssl_certificate_email: "admin@example.com"
+
+nginx_packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - lsb-release
+  - software-properties-common
+  - python3-openssl  # Required for Ansible OpenSSL modules

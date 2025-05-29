@@ -1,0 +1,662 @@
+---
+- name: Update package list
+  package_facts:
+    manager: "{{ 'apt' if elasticsearch_os_family == 'Debian' else 'rpm' }}"
+
+- set_fact:
+    elastic_virtual_proto: "{{ 'https' if elasticsearch_https_enabled else 'http' }}"
+    elasticsearch_current_version: "{{ ansible_facts.packages['elasticsearch'] | default(none) | map(attribute='version') | list }}"
+
+- name: Check current version elasticsearch
+  debug:
+    var: elasticsearch_current_version
+
+- name: Check inventory version elasticsearch
+  debug:
+    var: elasticsearch_version
+
+# Installation based on OS family
+- name: Uninstall non-validated Elasticsearch (Debian/Ubuntu)
+  apt:
+    name: elasticsearch
+    state: absent
+    purge: true
+  when: 
+    - elasticsearch_os_family == 'Debian'
+    - elasticsearch_version not in elasticsearch_current_version
+
+- name: Uninstall non-validated Elasticsearch (RedHat/CentOS)
+  yum:
+    name: elasticsearch
+    state: absent
+  when: 
+    - elasticsearch_os_family == 'RedHat'
+    - elasticsearch_version not in elasticsearch_current_version
+
+- name: Install Elasticsearch (Debian/Ubuntu)
+  apt:
+    name: "elasticsearch={{ elasticsearch_version }}"
+    state: present
+    force_apt_get: yes
+    force: yes
+  when: 
+    - elasticsearch_os_family == 'Debian'
+    - elasticsearch_version not in elasticsearch_current_version
+  notify:
+    - restart elasticsearch
+
+- name: Install Elasticsearch (RedHat/CentOS)
+  yum:
+    name: "elasticsearch-{{ elasticsearch_version }}"
+    state: present
+  when: 
+    - elasticsearch_os_family == 'RedHat'
+    - elasticsearch_version not in elasticsearch_current_version
+  notify:
+    - restart elasticsearch
+
+- name: Reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: Verify log directory
+  file: 
+    path: "{{ elasticsearch_log_dir }}"
+    state: directory
+    owner: "{{ elasticsearch_user }}"
+    group: "{{ elasticsearch_group }}"
+
+- name: Verify data directory
+  file:
+    path: "{{ elasticsearch_data_dir }}"
+    state: directory
+    owner: "{{ elasticsearch_user }}"
+    group: "{{ elasticsearch_group }}"
+
+- name: Verify cert dir
+  file:
+    path: "{{ elasticsearch_certs_dir }}"
+    state: directory
+    owner: "{{ elasticsearch_user }}"
+    group: "{{ elasticsearch_group }}"
+    mode: 0700
+
+- name: Fix directory permission
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ elasticsearch_user }}"
+    group: "{{ elasticsearch_group }}"
+    recurse: yes
+    mode: u=rwX,g=rX,o-rwx
+  loop:
+    - "{{ elasticsearch_conf_dir }}"
+    - "{{ elasticsearch_certs_dir}}"
+    - "{{ elasticsearch_pid_dir}}"
+    - "{{ elasticsearch_data_dir }}"
+    - "{{ elasticsearch_log_dir }}"
+
+- name: Set vm.max_map_count value
+  sysctl:
+    name: vm.max_map_count
+    value: "{{ elasticsearch_vm_max_map_count }}"
+    sysctl_set: yes
+    state: present
+    reload: yes
+
+- name: Disable swapping
+  sysctl: 
+    name: vm.swappiness 
+    value: "{{ elasticsearch_vm_swappiness }}"
+    state: present
+
+- name: Render elasticsearch configuration file
+  template:
+    src: elasticsearch.yml.j2
+    dest: "{{ elasticsearch_conf_dir }}/elasticsearch.yml"
+    owner: "{{ elasticsearch_user }}"
+    group: "{{ elasticsearch_group }}"
+    mode: 0644
+  notify:
+    - restart elasticsearch
+
+- name: Render elasticsearch JVM configuration file
+  template:
+    src: jvm.options.j2
+    dest: "{{ elasticsearch_conf_dir }}/jvm.options"
+    owner: "{{ elasticsearch_user }}"
+    group: "{{ elasticsearch_group }}"
+    mode: 0644
+  notify:
+    - restart elasticsearch
+
+- name: Copy elasticsearch log4j configuration file
+  copy:
+    src: log4j2.properties
+    dest: "{{ elasticsearch_conf_dir }}/log4j2.properties"
+    owner: "{{ elasticsearch_user }}"
+    group: "{{ elasticsearch_group }}"
+    mode: 0644
+  notify:
+    - restart elasticsearch
+
+# SSL certificate management
+
+- name: Create directory for certificates
+  file:
+    path: "{{ elasticsearch_certs_dir }}"
+    state: directory
+    mode: '0755'
+
+# Local certificate generation
+- name: Generate certificates transport always
+  block:
+    - name: Create SSL key on the first master node
+      shell: |
+        openssl genrsa -out {{ elasticsearch_certs_dir }}/transport.key 2048
+      args:
+        creates: "{{ elasticsearch_certs_dir }}/transport.key"
+      delegate_to: "{{ groups['elasticsearch_master'][0] }}"
+      run_once: true
+      when: elasticsearch_https_enabled
+
+    - name: Read SSL key content from first master
+      slurp:
+        src: "{{ elasticsearch_certs_dir }}/transport.key"
+      register: ssl_key_raw
+      delegate_to: "{{ groups['elasticsearch_master'][0] }}"
+      run_once: true
+      when: elasticsearch_https_enabled
+
+    - name: Create SSL certificate on the first master node
+      shell: |
+        openssl req -new -x509 -days 36500 -key {{ elasticsearch_certs_dir }}/transport.key -out {{ elasticsearch_certs_dir }}/transport.pem \
+          -subj "/C={{ elasticsearch_local_cert_country }}/ST={{ elasticsearch_local_cert_state }}/L={{ elasticsearch_local_cert_locality }}/O={{ elasticsearch_local_cert_organization }}/OU={{ elasticsearch_local_cert_organizational_unit }}/CN={{ elasticsearch_local_cert_common_name }}"
+      args:
+        creates: "{{ elasticsearch_certs_dir }}/transport.pem"
+      delegate_to: "{{ groups['elasticsearch_master'][0] }}"
+      run_once: true
+      when: elasticsearch_https_enabled
+
+    - name: Read SSL certificate content from first master
+      slurp:
+        src: "{{ elasticsearch_certs_dir }}/transport.pem"
+      register: ssl_cert_raw
+      delegate_to: "{{ groups['elasticsearch_master'][0] }}"
+      run_once: true
+      when: elasticsearch_https_enabled
+
+    - name: Write SSL key to all nodes
+      copy:
+        content: "{{ ssl_key_raw.content | b64decode }}"
+        dest: "{{ elasticsearch_certs_dir }}/transport.key"
+        owner: "{{ elasticsearch_user }}"
+        group: "{{ elasticsearch_group }}"
+        mode: '0600'
+      when: 
+        - elasticsearch_https_enabled
+        - ssl_key_raw is defined
+
+    - name: Write SSL certificate to all nodes
+      copy:
+        content: "{{ ssl_cert_raw.content | b64decode }}"
+        dest: "{{ elasticsearch_certs_dir }}/transport.pem"
+        owner: "{{ elasticsearch_user }}"
+        group: "{{ elasticsearch_group }}"
+        mode: '0644'
+      when: 
+        - elasticsearch_https_enabled
+        - ssl_cert_raw is defined
+  when: elasticsearch_https_enabled
+
+- name: Print elasticsearch_https_enabled variable value
+  debug:
+    msg: "{{ elasticsearch_https_enabled }}"
+
+- name: Generate domain certificates for HTTP (no Vault)
+  block:
+    - name: Create domain SSL key for HTTP
+      shell: |
+        openssl genrsa -out {{ elasticsearch_certs_dir }}/{{ dns_names[0] }}.key 2048
+      args:
+        creates: "{{ elasticsearch_certs_dir }}/{{ dns_names[0] }}.key"
+      run_once: yes
+      when: elasticsearch_https_enabled
+
+    - name: Create domain SSL certificate for HTTP
+      shell: |
+        openssl req -new -x509 -days 3650 -key {{ elasticsearch_certs_dir }}/{{ dns_names[0] }}.key -out {{ elasticsearch_certs_dir }}/{{ dns_names[0] }}.pem \
+          -subj "/C={{ elasticsearch_local_cert_country }}/ST={{ elasticsearch_local_cert_state }}/L={{ elasticsearch_local_cert_locality }}/O={{ elasticsearch_local_cert_organization }}/OU={{ elasticsearch_local_cert_organizational_unit }}/CN={{ dns_names[0] }}"
+      args:
+        creates: "{{ elasticsearch_certs_dir }}/{{ dns_names[0] }}.pem"
+      run_once: yes
+      when: elasticsearch_https_enabled
+
+    - name: Read domain SSL key content
+      slurp:
+        src: "{{ elasticsearch_certs_dir }}/{{ dns_names[0] }}.key"
+      register: domain_ssl_key
+      run_once: yes
+      when: elasticsearch_https_enabled
+
+    - name: Read domain SSL certificate content
+      slurp:
+        src: "{{ elasticsearch_certs_dir }}/{{ dns_names[0] }}.pem"
+      register: domain_ssl_cert
+      run_once: yes
+      when: elasticsearch_https_enabled
+
+    - name: Write domain SSL key to all nodes
+      copy:
+        content: "{{ domain_ssl_key.content | b64decode }}"
+        dest: "{{ elasticsearch_certs_dir }}/{{ dns_names[0] }}.key"
+        owner: "{{ elasticsearch_user }}"
+        group: "{{ elasticsearch_group }}"
+        mode: '0600'
+      when: elasticsearch_https_enabled
+
+    - name: Write domain SSL certificate to all nodes
+      copy:
+        content: "{{ domain_ssl_cert.content | b64decode }}"
+        dest: "{{ elasticsearch_certs_dir }}/{{ dns_names[0] }}.pem"
+        owner: "{{ elasticsearch_user }}"
+        group: "{{ elasticsearch_group }}"
+        mode: '0644'
+      when: elasticsearch_https_enabled
+  when: 
+    - not elasticsearch_use_vault
+    - elasticsearch_https_enabled
+
+# Vault certificate generation
+- name: Generate certificates using Vault
+  block:
+    - name: Set common_name fact
+      set_fact:
+        common_name: "{{ dns_names[0] }}"
+      run_once: yes
+
+    - name: Generate certificate via Vault
+      uri:
+        url: "{{ elasticsearch_vault_addr }}/v1/intermediate_pki/issue/generic-cert"
+        method: POST
+        headers:
+          X-Vault-Token: "{{ elasticsearch_vault_token }}"
+        body: "{{ {'common_name': common_name} | to_json }}"
+        body_format: json
+        validate_certs: "{{ elasticsearch_vault_validate_certs }}"
+      register: cert_response
+      run_once: yes
+
+    - name: Ensure certificate generation was successful
+      fail:
+        msg: "Certificate generation failed: {{ cert_response.json.errors }}"
+      when: cert_response.json.errors is defined and cert_response.json.errors | length > 0
+      run_once: yes
+
+    - name: Set certificate and key facts
+      set_fact:
+        certificate: "{{ cert_response.json.data.certificate }}"
+        ca_chain: "{{ cert_response.json.data.issuing_ca }}"
+        private_key: "{{ cert_response.json.data.private_key }}"
+      run_once: yes
+
+    - name: Write certificate to file
+      copy:
+        content: "{{ certificate }}"
+        dest: "{{ elasticsearch_certs_dir }}/{{ common_name }}.pem"
+        mode: '0644'
+        owner: "{{ elasticsearch_user }}"
+        group: "{{ elasticsearch_group }}"
+
+    - name: Write CA chain to file
+      copy:
+        content: "{{ ca_chain }}"
+        dest: "{{ elasticsearch_certs_dir }}/ca_chain.pem"
+        mode: '0644'
+        owner: "{{ elasticsearch_user }}"
+        group: "{{ elasticsearch_group }}"    
+
+    - name: Write private key to file
+      copy:
+        content: "{{ private_key }}"
+        dest: "{{ elasticsearch_certs_dir }}/{{ common_name }}.key"
+        mode: '0600'
+        owner: "{{ elasticsearch_user }}"
+        group: "{{ elasticsearch_group }}"
+
+    - name: Print certificate, CA chain, and private key paths
+      debug:
+        msg:
+          - "Certificate: {{ elasticsearch_certs_dir }}/{{ common_name }}.pem"
+          - "CA Chain: {{ elasticsearch_certs_dir }}/ca_chain.pem"
+          - "Private Key: {{ elasticsearch_certs_dir }}/{{ common_name }}.key"
+  when: 
+    - elasticsearch_use_vault
+    - elasticsearch_https_enabled
+
+- name: Stop elasticsearch
+  service:
+    name: "{{ elasticsearch_service }}"
+    state: stopped
+    enabled: yes
+
+# User credentials management
+
+# Local credential management
+- name: Set up local credentials without Vault
+  block:
+    - name: Set elasticsearch user credentials (local)
+      set_fact:
+        elasticsearch_superuser:
+          username: "{{ elasticsearch_local_superuser_username }}"
+          password: "{{ elasticsearch_local_superuser_password }}"
+        elasticsearch_developer:
+          username: "{{ elasticsearch_local_developer_username }}"
+          password: "{{ elasticsearch_local_developer_password }}"
+        elasticsearch_kibana_system:
+          username: "{{ elasticsearch_local_kibana_system_username }}"
+          password: "{{ elasticsearch_local_kibana_system_password }}"
+  when: not elasticsearch_use_vault
+
+# Vault credential management
+- name: Set up credentials with Vault
+  block:
+    - name: Retrieve efk ansible secret from Vault
+      set_fact:
+        efk_ansible_secret: "{{ lookup('community.hashi_vault.hashi_vault', 'secret=' + elasticsearch_vault_path + ' token=' + elasticsearch_vault_token + ' url=' + elasticsearch_vault_addr + ' validate_certs=no') | default({}) }}"
+      failed_when: false
+      ignore_errors: yes
+
+    - name: Ensure efk_ansible_secret is defined
+      set_fact:
+        efk_ansible_secret: "{{ efk_ansible_secret | default({}) }}"
+
+    - name: Check if efk ansible secret was found
+      set_fact:
+        efk_ansible_secret_found: "{{ efk_ansible_secret != {} }}"
+
+    - name: Generate kibana_system password via Vault if not exists
+      uri:
+        url: "{{ elasticsearch_vault_addr }}/v1/transit/random/12"
+        method: POST
+        headers:
+          X-Vault-Token: "{{ elasticsearch_vault_token }}"
+        validate_certs: "{{ elasticsearch_vault_validate_certs }}"
+      register: kibana_system_password
+      when: not efk_ansible_secret_found
+      run_once: yes
+
+    - name: Set default kibana_system_password if not generated
+      set_fact:
+        kibana_system_password: "{{ kibana_system_password.json.data.random_bytes | b64encode if kibana_system_password is defined else '' }}"
+      when: not efk_ansible_secret_found
+      run_once: yes
+
+    - name: Generate elasticsearch_admin password via Vault if not exists
+      uri:
+        url: "{{ elasticsearch_vault_addr }}/v1/transit/random/12"
+        method: POST
+        headers:
+          X-Vault-Token: "{{ elasticsearch_vault_token }}"
+        validate_certs: "{{ elasticsearch_vault_validate_certs }}"
+      register: elasticsearch_admin_password
+      when: not efk_ansible_secret_found
+      run_once: yes
+
+    - name: Set default elasticsearch_admin_password if not generated
+      set_fact:
+        elasticsearch_admin_password: "{{ elasticsearch_admin_password.json.data.random_bytes | b64encode if elasticsearch_admin_password is defined else '' }}"
+      when: not efk_ansible_secret_found
+      run_once: yes
+
+    - name: Generate elasticsearch_developer password via Vault if not exists
+      uri:
+        url: "{{ elasticsearch_vault_addr }}/v1/transit/random/12"
+        method: POST
+        headers:
+          X-Vault-Token: "{{ elasticsearch_vault_token }}"
+        validate_certs: "{{ elasticsearch_vault_validate_certs }}"
+      register: elasticsearch_developer_password
+      when: not efk_ansible_secret_found
+      run_once: yes
+
+    - name: Set default elasticsearch_developer_password if not generated
+      set_fact:
+        elasticsearch_developer_password: "{{ elasticsearch_developer_password.json.data.random_bytes | b64encode if elasticsearch_developer_password is defined else '' }}"
+      when: not efk_ansible_secret_found
+      run_once: yes
+
+    - name: Store secrets in Vault using Vault's HTTP API
+      uri:
+        url: "{{ elasticsearch_vault_addr }}/v1/{{ elasticsearch_vault_path }}"
+        method: POST
+        body: "{{ {'kibana_system': kibana_system_password, 'elasticsearch_admin': elasticsearch_admin_password, 'elasticsearch_developer': elasticsearch_developer_password} | to_json }}"
+        body_format: json
+        headers:
+          X-Vault-Token: "{{ elasticsearch_vault_token }}"
+        validate_certs: "{{ elasticsearch_vault_validate_certs }}"
+        status_code: [200, 204]
+      when: not efk_ansible_secret_found
+      run_once: yes
+      ignore_errors: no
+
+    - name: Fetch stored secrets from Vault
+      set_fact:
+        stored_secrets: "{{ lookup('community.hashi_vault.hashi_vault', 'secret=' + elasticsearch_vault_path + ' token=' + elasticsearch_vault_token + ' url=' + elasticsearch_vault_addr + ' validate_certs=no') | default({}) }}"
+      failed_when: false
+      ignore_errors: yes
+
+    - name: Debug stored secrets
+      debug:
+        var: stored_secrets
+
+    - name: Set elasticsearch superuser credentials
+      set_fact:
+        elasticsearch_superuser:
+          username: "admin"
+          password: "{{ stored_secrets.CI_ELASTICSEARCH_ADMIN }}"
+
+    - name: Set elasticsearch developer credentials
+      set_fact:
+        elasticsearch_developer:
+          username: "developer"
+          password: "{{ stored_secrets.CI_ELASTICSEARCH_DEVELOPER }}"  
+
+    - name: Set elasticsearch kibana_system credentials
+      set_fact:
+        elasticsearch_kibana_system:
+          username: "kibana_system"
+          password: "{{ stored_secrets.CI_KIBANA_SYSTEM }}"
+  when: elasticsearch_use_vault
+
+# User management in Elasticsearch
+- name: Add/update Elasticsearch users
+  block:
+    - name: New superuser add
+      shell: "printf {{ elasticsearch_superuser.password }} | {{ elasticsearch_users_binary }} useradd {{ elasticsearch_superuser.username }} -p {{ elasticsearch_superuser.password }} -r superuser"
+      register: users_result
+      ignore_errors: true
+
+    - name: Change password superuser
+      shell: "printf {{ elasticsearch_superuser.password }} | {{ elasticsearch_users_binary }} passwd {{ elasticsearch_superuser.username }} -p {{ elasticsearch_superuser.password }}"
+      when: "'already exists' in users_result.stderr"
+      ignore_errors: true
+
+    - name: Start elasticsearch
+      service:
+        name: "{{ elasticsearch_service }}"
+        state: started
+        enabled: yes
+
+    - name: Wait for Elasticsearch to be ready
+      uri:
+        url: "{{ elastic_virtual_proto }}://{{ dns_names[0] }}:9200/_cluster/health"
+        user: "{{ elasticsearch_superuser.username }}"
+        password: "{{ elasticsearch_superuser.password }}"
+        method: GET
+        force_basic_auth: yes
+        validate_certs: no
+        status_code: [201, 409, 200]
+      register: cluster_health
+      until: cluster_health.json.status == "green" or cluster_health.json.status == "yellow"
+      retries: 30
+      delay: 20
+      run_once: true
+      when: elasticsearch_security_enabled
+
+    - name: Setup kibana_system user
+      uri:
+        url: "{{ elastic_virtual_proto }}://{{ dns_names[0] }}:9200/_security/user/{{ elasticsearch_kibana_system.username }}/_password"
+        user: "{{ elasticsearch_superuser.username }}"
+        password: "{{ elasticsearch_superuser.password }}"
+        method: POST
+        body: {"password" : "{{ elasticsearch_kibana_system.password }}"} 
+        force_basic_auth: yes
+        validate_certs: no
+        status_code: [201, 409, 200]
+        body_format: json
+      retries: 10
+      delay: 60
+      run_once: true
+      when: elasticsearch_security_enabled
+
+    - name: Configure Kibana role for developer
+      uri:
+        url: "{{ elastic_virtual_proto }}://{{ dns_names[0] }}:9200/_security/role/developer"
+        method: POST
+        user: "{{ elasticsearch_superuser.username }}"
+        password: "{{ elasticsearch_superuser.password }}"
+        body_format: json
+        body: >
+          {
+            "indices": [
+              {
+                "names": [ "*" ],
+                "privileges": ["all"]
+              }
+            ],
+            "applications": [
+              {
+                "application": "kibana-.kibana",
+                "privileges": [
+                  "feature_discover.all"
+                ],
+                "resources": [
+                  "space:default"
+                ]
+              }
+            ]
+          }
+        headers:
+          Content-Type: "application/json"
+        validate_certs: no
+        status_code: [201, 409, 200]
+      retries: 3
+      delay: 5
+      when: elasticsearch_security_enabled
+
+    - name: Setup developer user
+      uri:
+        url: "{{ elastic_virtual_proto }}://{{ dns_names[0] }}:9200/_security/user/{{ elasticsearch_developer.username }}"
+        user: "{{ elasticsearch_superuser.username }}"
+        password: "{{ elasticsearch_superuser.password }}"
+        method: POST
+        body: 
+          password: "{{ elasticsearch_developer.password }}"
+          roles: ["editor"]
+        force_basic_auth: yes
+        validate_certs: no
+        status_code: [201, 409, 200]
+        body_format: json
+      retries: 10
+      delay: 60
+      run_once: true
+      when: elasticsearch_security_enabled
+
+# ILM policy setup
+- name: Add ILM policies
+  block:
+    - name: Create Elasticsearch ILM policy for index deletion
+      uri:
+        url: "{{ elastic_virtual_proto }}://{{ dns_names[0] }}:9200/_ilm/policy/delete_index_policy"
+        method: PUT
+        body_format: json
+        body: >
+          {
+            "policy": {
+              "phases": {
+                "delete": {
+                  "min_age": "{{ elasticsearch_index_keep_days }}",
+                  "actions": {
+                    "delete": {}
+                  }
+                }
+              }
+            }
+          }
+        headers:
+          Content-Type: "application/json"
+        status_code: [200, 201]
+        user: "{{ elasticsearch_superuser.username }}"
+        password: "{{ elasticsearch_superuser.password }}"
+        force_basic_auth: yes
+        validate_certs: no
+      when: elasticsearch_security_enabled and elasticsearch_index_keep_days != ""
+      run_once: true
+
+    - name: Add index template for k8s-template
+      uri:
+        url: "{{ elastic_virtual_proto }}://{{ dns_names[0] }}:9200/_index_template/k8s-template"
+        method: PUT
+        user: "{{ elasticsearch_superuser.username }}"
+        password: "{{ elasticsearch_superuser.password }}"
+        body_format: json
+        body: >
+          {
+            "index_patterns": ["{{ elasticsearch_index_pattern }}-*"],
+            "template": {
+              "settings": {
+                "number_of_shards": 1,
+                "number_of_replicas": 1,
+                "index.lifecycle.name": "delete_index_policy",  
+                "index.lifecycle.rollover_alias": "{{ elasticsearch_index_pattern }}-alias"
+              },
+              "mappings": {
+                "properties": {
+                  "timestamp": {
+                    "type": "date"
+                  },
+                  "message": {
+                    "type": "text"
+                  },
+                  "log_level": {
+                    "type": "keyword"
+                  }
+                }
+              }
+            },
+            "priority": 1
+          }
+        headers:
+          Content-Type: "application/json"
+        validate_certs: no
+        status_code: [200, 201]
+      retries: 3
+      delay: 5
+      when: elasticsearch_security_enabled and elasticsearch_index_pattern != ""
+      run_once: true
+  when: elasticsearch_security_enabled
+
+# Print summary of configuration
+- name: Print Elasticsearch configuration summary
+  debug:
+    msg:
+      - "Elasticsearch {{ elasticsearch_version }} installation completed"
+      - "Cluster name: {{ elasticsearch_cluster_name }}"
+      - "Security enabled: {{ elasticsearch_security_enabled }}"
+      - "HTTPS enabled: {{ elasticsearch_https_enabled }}"
+      - "Vault integration: {{ elasticsearch_use_vault }}"
+      - "Data directory: {{ elasticsearch_data_dir }}"
+      - "Log directory: {{ elasticsearch_log_dir }}"
+      - "Configuration directory: {{ elasticsearch_conf_dir }}"
+      - "Certificates directory: {{ elasticsearch_certs_dir }}"

@@ -1,0 +1,102 @@
+---
+# Detect OS family if needed
+- name: Gather OS facts
+  ansible.builtin.setup:
+    gather_subset:
+      - '!all'
+      - '!min'
+      - distribution
+      - os_family
+  when: elasticsearch_use_os_detection | bool
+
+- name: Update the /etc/hosts file with node names
+  lineinfile:
+    dest: /etc/hosts
+    regexp: '.*{{ item }}$'
+    line: "{{ hostvars[item].ansible_host }} {{item}}"
+    state: present
+  when: 
+    - hostvars[item].ansible_host is defined
+    - inventory_hostname in groups["elasticsearch"]
+  loop: "{{ groups.all }}"
+
+- name: Disable UFW (Debian/Ubuntu)
+  systemd:
+    name: ufw 
+    state: stopped 
+    enabled: no
+  when: 
+    - elasticsearch_disable_firewall | bool
+    - elasticsearch_os_family == 'Debian'
+
+- name: Disable firewalld (RedHat/CentOS)
+  systemd:
+    name: firewalld
+    state: stopped
+    enabled: no
+  when:
+    - elasticsearch_disable_firewall | bool
+    - elasticsearch_os_family == 'RedHat'
+
+- name: Add elasticsearch group 
+  group:
+    name: "{{ elasticsearch_group }}"
+    state: present
+
+- name: Add elasticsearch user
+  user:
+    name: "{{ elasticsearch_user }}"
+    shell: /bin/sh
+    password: "*"
+    group: "{{ elasticsearch_group }}"
+
+# Setup repositories based on OS family
+- name: Setup for Debian/Ubuntu
+  block:
+    - name: Download Elastic GPG key
+      get_url:
+        url: "{{ elasticsearch_gpg_key_url }}"
+        dest: "/tmp/GPG-KEY-elasticsearch"
+
+    - name: Add Elastic GPG key to keyring
+      shell: 'gpg --no-default-keyring --keyring {{ elasticsearch_gpg_key_dest }} --import /tmp/GPG-KEY-elasticsearch'
+      args:
+        creates: "{{ elasticsearch_gpg_key_dest }}"
+
+    - name: Install utils
+      apt:
+        name: "{{ item }}"
+        state: present
+        force_apt_get: yes
+      loop: "{{ elasticsearch_packages }}"
+
+    - name: Add Elastic repo
+      apt_repository:
+        filename: "{{ elasticsearch_repo_file_name }}"
+        repo: "{{ elasticsearch_repo }}"
+        state: present
+        update_cache: yes
+  when: elasticsearch_os_family == 'Debian'
+
+- name: Setup for RedHat/CentOS
+  block:
+    - name: Install utils
+      yum:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ elasticsearch_packages }}"
+
+    - name: Import Elasticsearch GPG key
+      rpm_key:
+        key: "{{ elasticsearch_gpg_key_url }}"
+        state: present
+
+    - name: Add Elasticsearch repository
+      yum_repository:
+        name: elasticsearch
+        description: "Elasticsearch repository for {{ elasticsearch_major_version }}.x packages"
+        baseurl: "{{ elasticsearch_yum_repo_baseurl }}"
+        gpgcheck: "{{ elasticsearch_yum_gpgcheck }}"
+        gpgkey: "{{ elasticsearch_yum_repo_gpgkey }}"
+        enabled: "{{ elasticsearch_yum_enabled }}"
+  when: elasticsearch_os_family == 'RedHat'

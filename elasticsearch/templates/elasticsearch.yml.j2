@@ -1,0 +1,104 @@
+# ======================== Elasticsearch Configuration =========================
+
+cluster.name: {{ elasticsearch_cluster_name }}
+
+node.name: {{ ansible_hostname|lower }}
+
+{% if elasticsearch_clustermode_enabled %} 
+
+{% if groups.get("elasticsearch_master") and inventory_hostname in groups["elasticsearch_master"] %}
+node.roles:
+  - master
+  - ingest
+
+{% elif groups.get("elasticsearch_coordinating") and inventory_hostname in groups["elasticsearch_coordinating"] %}
+node.roles: []
+
+{% elif groups.get("elasticsearch_data") and  inventory_hostname in groups["elasticsearch_data"] %}
+node.roles:
+  - data
+  - ingest
+
+{% elif groups.get("elasticsearch_master_and_data") and inventory_hostname in groups["elasticsearch_master_and_data"] %}
+node.roles:
+  - master
+  - data
+  - ingest
+{% endif %}
+
+{% endif %}
+
+path.data: {{ elasticsearch_data_dir }}
+path.logs: {{ elasticsearch_log_dir }}
+
+network.host: 0.0.0.0
+network.publish_host: {{ elastic_ip_address }}
+http.port: 9200
+transport.port: 9300
+
+{% if groups['elasticsearch'] | length > 1 %}
+discovery.type: "multi-node"
+
+{# FIXED: Only include master-eligible nodes in discovery.seed_hosts #}
+discovery.seed_hosts:
+{% set master_eligible_nodes = groups.get('elasticsearch_master', []) + groups.get('elasticsearch_master_and_data', []) %}
+{% for host in master_eligible_nodes %}
+  - {{ hostvars[host]['elastic_ip_address'] }}:9300
+{% endfor %}
+
+{# FIXED: Only master-eligible nodes should be in initial_master_nodes #}
+{% if groups.get('elasticsearch_master') and inventory_hostname in groups['elasticsearch_master'] %}
+cluster.initial_master_nodes:
+{% set master_nodes = groups.get('elasticsearch_master', []) + groups.get('elasticsearch_master_and_data', []) %}
+{% for host in master_nodes %}
+  - {{ hostvars[host]['ansible_hostname']|lower }}
+{% endfor %}
+{% elif groups.get('elasticsearch_master_and_data') and inventory_hostname in groups['elasticsearch_master_and_data'] %}
+cluster.initial_master_nodes:
+{% set master_nodes = groups.get('elasticsearch_master', []) + groups.get('elasticsearch_master_and_data', []) %}
+{% for host in master_nodes %}
+  - {{ hostvars[host]['ansible_hostname']|lower }}
+{% endfor %}
+{% endif %}
+
+{% else %}
+discovery.type: "single-node"
+{% endif %}
+
+{% if elasticsearch_security_enabled %}
+xpack.security.enabled: true
+xpack.security.enrollment.enabled: true
+
+{% if elasticsearch_clustermode_enabled %}
+xpack.security.transport.ssl:
+  enabled: true
+  verification_mode: certificate
+  client_authentication: required
+  key: {{ elasticsearch_certs_dir }}/transport.key
+  certificate: {{ elasticsearch_certs_dir }}/transport.pem
+{% endif %}
+
+{% else %}
+xpack.security.enabled: false
+xpack.security.transport.ssl.enabled: false
+{% endif %}
+
+{% if elasticsearch_https_enabled %}
+xpack.security.http.ssl:
+  enabled: true
+  key: {{ elasticsearch_certs_dir }}/{{ dns_names[0] }}.key
+  certificate: {{ elasticsearch_certs_dir }}/{{ dns_names[0] }}.pem
+{% else %}
+xpack.security.http.ssl.enabled: false
+{% endif %}
+
+{% if elasticsearch_major_version == '9' and elasticsearch_v9_features_enabled | default(true) %}
+cluster.routing.allocation.disk.watermark.low: {{ elasticsearch_disk_watermark_low | default('85%') }}
+cluster.routing.allocation.disk.watermark.high: {{ elasticsearch_disk_watermark_high | default('90%') }}
+cluster.routing.allocation.disk.watermark.flood_stage: {{ elasticsearch_disk_watermark_flood | default('95%') }}
+
+{% elif elasticsearch_major_version == '8' %}
+cluster.routing.allocation.disk.watermark.low: {{ elasticsearch_disk_watermark_low | default('85%') }}
+cluster.routing.allocation.disk.watermark.high: {{ elasticsearch_disk_watermark_high | default('90%') }}
+cluster.routing.allocation.disk.watermark.flood_stage: {{ elasticsearch_disk_watermark_flood | default('95%') }}
+{% endif %}

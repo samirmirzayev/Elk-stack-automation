@@ -1,0 +1,72 @@
+---
+# defaults file for kibana
+
+kibana_disable_firewall: yes
+
+kibana_version: 8.13.4
+kibana_dns_name: ""
+kibana_port: 5601
+
+kibana_gpg_key_url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+kibana_gpg_key_dest: /usr/share/keyrings/elasticsearch-keyring.gpg
+kibana_repo_file_name: kibana-8.x.list
+kibana_repo: "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/8.x/apt stable main"
+
+kibana_packages:
+  - apt-transport-https
+
+kibana_user: kibana
+kibana_group: kibana
+kibana_service: kibana
+kibana_conf_dir: /etc/kibana
+kibana_log_dir: /var/log/kibana
+kibana_certs_dir: /etc/kibana/certs
+kibana_pid_dir: /var/run/kibana
+kibana_data_dir: /data/kibana
+kibana_https_enabled: yes
+kibana_old_space_mb: 1024
+
+data_view_title: "prod-k8s-*"
+data_view_time_field: "@timestamp"
+visualization_config:
+  title: "My Visualization"
+  type: "line"
+  aggs:
+    1:
+      type: "count"
+      schema: "metric"
+  params:
+    addLegend: true
+    addTimeMarker: true
+    defaultYExtents: false
+    drawLinesBetweenPoints: true
+    grid: {categoryLines: false, style: {color: "#eee"}}
+    hideYAxis: false
+    interpolate: "linear"
+    legendPosition: "right"
+    radiusRatio: 9
+    scale: "linear"
+    setYExtents: false
+    shareYAxis: true
+    showCircles: true
+    showDownloadButton: false
+    showDropLastBucket: false
+    showMetricLabel: false
+    showPercentage: false
+    showPrevious: false
+    showTimePicker: true
+    showValues: false
+    stacked: false
+dashboard_title: "K8S Dashboard"
+dashboard_visualizations:
+  - id: "visualization_1"
+    type: "visualization"
+    saved_object_type: "visualization"
+    saved_object_id: "visualization:1"
+
+vault_token: "{{ lookup('env', 'VAULT_TOKEN') }}"
+vault_addr: "{{ lookup('env', 'VAULT_ADDR') }}"
+vault_path: "{{ lookup('env', 'VAULT_PATH') }}"
+vault_validate_certs: "{{ lookup('env', 'VAULT_SKIP_VERIFY') | default('no') }}"
+
+elasticsearch_certs_dir:  /etc/elasticsearch/certs

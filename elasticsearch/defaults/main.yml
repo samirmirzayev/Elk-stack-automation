@@ -1,0 +1,100 @@
+# defaults file for elasticsearch
+elasticsearch_disable_firewall: yes
+
+# Major version selection - affects repository, features, and configurations
+elasticsearch_major_version: 9
+elasticsearch_minor_version: 0.0
+elasticsearch_version: "{{ elasticsearch_major_version }}.{{ elasticsearch_minor_version }}"
+elasticsearch_cluster_name: ""
+elasticsearch_dns_name: ""
+
+# OS-specific configurations
+elasticsearch_use_os_detection: true
+# Override these variables to skip OS detection
+elasticsearch_os_family: "{{ ansible_facts['os_family'] | default('Debian') }}"
+elasticsearch_os_name: "{{ ansible_facts['distribution'] | default('Ubuntu') }}"
+elasticsearch_os_version: "{{ ansible_facts['distribution_major_version'] | default('22') }}"
+
+# Repository configurations - dynamically determined based on major version
+elasticsearch_gpg_key_url: "https://artifacts.elastic.co/GPG-KEY-elasticsearch"
+elasticsearch_gpg_key_dest: "/usr/share/keyrings/elasticsearch-keyring.gpg"
+elasticsearch_repo_file_name: "elastic-{{ elasticsearch_major_version }}.x.list"
+elasticsearch_repo: "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/{{ elasticsearch_major_version }}.x/apt stable main"
+
+# Red Hat specific repository settings
+elasticsearch_yum_repo_file_name: "elasticsearch.repo"
+elasticsearch_yum_repo_baseurl: "https://artifacts.elastic.co/packages/{{ elasticsearch_major_version }}.x/yum"
+elasticsearch_yum_gpgcheck: "1"
+elasticsearch_yum_repo_gpgkey: "{{ elasticsearch_gpg_key_url }}"
+elasticsearch_yum_enabled: "1"
+
+# Package dependencies by OS family
+elasticsearch_packages_debian:
+  - curl
+  - apt-transport-https
+  - gnupg2
+elasticsearch_packages_redhat:
+  - curl
+  - openssl
+elasticsearch_packages: "{{ elasticsearch_packages_debian if elasticsearch_os_family == 'Debian' else elasticsearch_packages_redhat }}"
+
+elasticsearch_user: elasticsearch
+elasticsearch_group: elasticsearch
+elasticsearch_service: elasticsearch
+elasticsearch_data_dir: /data/elasticsearch
+elasticsearch_log_dir: /var/log/elasticsearch
+elasticsearch_pid_dir: /var/run/elasticsearch
+elasticsearch_conf_dir: /etc/elasticsearch
+elasticsearch_certs_dir:  /etc/elasticsearch/certs
+elasticsearch_plugins_dir: /usr/share/elasticsearch/plugins
+elasticsearch_keystore_binary: /usr/share/elasticsearch/bin/elasticsearch-keystore
+elasticsearch_plugin_binary: /usr/share/elasticsearch/bin/elasticsearch-plugin
+elasticsearch_users_binary: /usr/share/elasticsearch/bin/elasticsearch-users
+elasticsearch_security_enabled: no
+elasticsearch_https_enabled: no
+elasticsearch_crt_filename: ""
+elasticsearch_key_filename: ""
+
+elasticsearch_jvm_xmx: 4g
+elasticsearch_jvm_xms: 4g
+elasticsearch_vm_max_map_count: '262144'
+elasticsearch_vm_swappiness:  "1"
+elasticsearch_master_is_also_data_node: yes
+elasticsearch_default_node_roles: 
+  - master
+
+elasticsearch_index_pattern: ""
+elasticsearch_index_keep_days: ""
+
+# Elasticsearch version-specific settings
+elasticsearch_v9_features_enabled: "{{ elasticsearch_major_version == '9' }}"
+elasticsearch_disk_watermark_low: "85%"
+elasticsearch_disk_watermark_high: "90%"
+elasticsearch_disk_watermark_flood: "95%"
+elasticsearch_jfr_enabled: false
+
+# Cluster configuration
+elasticsearch_clustermode_enabled: "{{ groups['elasticsearch'] | length > 1 }}"
+
+# Vault integration toggle
+elasticsearch_use_vault: true
+elasticsearch_vault_token: "{{ lookup('env', 'VAULT_TOKEN') | default('') }}"
+elasticsearch_vault_addr: "{{ lookup('env', 'VAULT_ADDR') | default('') }}"
+elasticsearch_vault_path: "{{ lookup('env', 'VAULT_PATH') | default('') }}"
+elasticsearch_vault_validate_certs: "{{ not (lookup('env', 'VAULT_SKIP_VERIFY') | default('0') | bool) }}"
+
+# Local certificate configuration (when not using Vault)
+elasticsearch_local_cert_country: "AZ"
+elasticsearch_local_cert_state: "BAKU"
+elasticsearch_local_cert_locality: "BAKU"
+elasticsearch_local_cert_organization: "ORGANIZATION"
+elasticsearch_local_cert_organizational_unit: "IT"
+elasticsearch_local_cert_common_name: "*.elasticsearch.local"
+
+# Local user credentials (when not using Vault)
+elasticsearch_local_superuser_username: "admin"
+elasticsearch_local_superuser_password: "{{ lookup('password', '/dev/null length=16 chars=ascii_letters,digits') }}"
+elasticsearch_local_developer_username: "developer"
+elasticsearch_local_developer_password: "{{ lookup('password', '/dev/null length=16 chars=ascii_letters,digits') }}"
+elasticsearch_local_kibana_system_username: "kibana_system"
+elasticsearch_local_kibana_system_password: "{{ lookup('password', '/dev/null length=16 chars=ascii_letters,digits') }}"

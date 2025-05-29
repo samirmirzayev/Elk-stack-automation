@@ -1,0 +1,47 @@
+---
+# Java installation based on OS family
+- name: Install Java for Debian/Ubuntu
+  apt:
+    name: "{{ item }}"
+    state: present
+    force_apt_get: yes
+    force: yes
+  with_items:
+    - openjdk-21-jre
+  when: elasticsearch_os_family == 'Debian'
+
+- name: Install Java for RedHat/CentOS
+  yum:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - java-21-openjdk
+  when: elasticsearch_os_family == 'RedHat'
+
+# Verify Java installation
+- name: Verify Java installation
+  command: java -version
+  register: java_version
+  changed_when: false
+  failed_when: false
+
+- name: Display installed Java version
+  debug:
+    var: java_version.stderr
+
+# Set JAVA_HOME if needed
+- name: Set JAVA_HOME for Elasticsearch
+  lineinfile:
+    path: /etc/environment
+    line: "JAVA_HOME={{ java_home_path }}"
+    regexp: "^JAVA_HOME="
+    state: present
+  vars:
+    java_home_path: "{{ '/usr/lib/jvm/java-21-openjdk-amd64' if elasticsearch_os_family == 'Debian' else '/usr/lib/jvm/jre-21' }}"
+  register: java_home_set
+
+- name: Source environment file if JAVA_HOME was updated
+  shell: source /etc/environment
+  args:
+    executable: /bin/bash
+  when: java_home_set.changed

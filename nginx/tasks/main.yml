@@ -1,0 +1,162 @@
+---
+- name: Execute Nginx version command
+  shell: nginx -v 2>&1 | cut -d'/' -f2
+  register: nginx_version_output
+  changed_when: false
+  failed_when: false
+
+- name: Set Nginx version fact
+  set_fact:
+    nginx_current_version: "{{ nginx_version_output.stdout }}"
+
+- name: Install required dependencies
+  apt:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ nginx_packages }}"
+  when: nginx_current_version != nginx_version
+
+- name: Add Nginx repository GPG key
+  apt_key:
+    url: "https://nginx.org/keys/nginx_signing.key"
+    state: present
+  when: nginx_current_version != nginx_version
+
+- name: Add Nginx repository
+  apt_repository:
+    repo: "deb https://nginx.org/packages/ubuntu/ {{ ansible_distribution_release }} nginx"
+    state: present
+  when: nginx_current_version != nginx_version
+
+- name: Update apt cache
+  apt:
+    update_cache: yes
+  when: nginx_current_version != nginx_version
+
+- name: Install Nginx specific version
+  apt:
+    name: "nginx={{ nginx_version }}*"
+    state: present
+  when: nginx_current_version != nginx_version
+
+- name: Create NGINX configuration
+  template:
+    src: default.conf.j2
+    dest: "{{ nginx_conf_dir }}/default.conf"
+    mode: 0644
+  notify: reload nginx
+
+- name: Verify cert dir
+  file:
+    path: "{{ nginx_certs_path }}"
+    state: directory
+    mode: 0700
+
+# Check if Vault is enabled and accessible
+- name: Check if Vault is enabled
+  set_fact:
+    vault_enabled: "{{ vault_token is defined and vault_token != '' and vault_addr is defined and vault_addr != '' }}"
+
+- name: Test Vault connectivity
+  uri:
+    url: "{{ vault_addr }}/v1/sys/health"
+    method: GET
+    validate_certs: "{{ vault_validate_certs | bool }}"
+    status_code: [200, 429, 472, 473, 501, 503]
+  register: vault_health_check
+  failed_when: false
+  when: vault_enabled | bool
+
+- name: Set Vault accessibility fact
+  set_fact:
+    vault_accessible: "{{ vault_enabled | bool and vault_health_check is defined and vault_health_check.status in [200, 429, 472, 473] }}"
+
+# Vault SSL Certificate Management
+- block:
+  - name: Fetch TLS certificate from Vault
+    uri:
+      url: "{{ vault_addr }}/v1/{{ vault_path }}/{{ item }}"
+      method: GET
+      return_content: yes
+      headers:
+        X-Vault-Token: "{{ vault_token }}"
+      validate_certs: "{{ vault_validate_certs | bool }}"
+    register: vault_tls_certificate_response
+    loop: "{{ dns_names }}"
+
+  - name: Save the TLS certificate from Vault
+    copy:
+      content: "{{ vault_tls_certificate_response.results[0].json.data['tls.crt'] }}"
+      dest: "{{ nginx_certs_path }}/{{ item }}.pem"
+      mode: 0644
+    loop: "{{ dns_names }}"
+
+  - name: Save the private key from Vault
+    copy:
+      content: "{{ vault_tls_certificate_response.results[0].json.data['tls.key'] }}"
+      dest: "{{ nginx_certs_path }}/{{ item }}.key"
+      mode: 0600
+    loop: "{{ dns_names }}"
+
+  when: vault_accessible | bool
+
+# Self-signed SSL Certificate Management (when Vault is not available)
+- block:
+  - name: Install OpenSSL package
+    apt:
+      name: openssl
+      state: present
+
+  - name: Generate private key for each domain
+    openssl_privatekey:
+      path: "{{ nginx_certs_path }}/{{ item }}.key"
+      size: 2048
+      mode: 0600
+    loop: "{{ dns_names }}"
+
+  - name: Generate certificate signing request (CSR)
+    openssl_csr:
+      path: "{{ nginx_certs_path }}/{{ item }}.csr"
+      privatekey_path: "{{ nginx_certs_path }}/{{ item }}.key"
+      common_name: "{{ item }}"
+      subject_alt_name: 
+        - "DNS:{{ item }}"
+        - "DNS:*.{{ item }}"
+      mode: 0644
+    loop: "{{ dns_names }}"
+
+  - name: Generate self-signed certificate
+    openssl_certificate:
+      path: "{{ nginx_certs_path }}/{{ item }}.pem"
+      privatekey_path: "{{ nginx_certs_path }}/{{ item }}.key"
+      csr_path: "{{ nginx_certs_path }}/{{ item }}.csr"
+      provider: selfsigned
+      valid_in: 31536000  # 1 year
+      mode: 0644
+    loop: "{{ dns_names }}"
+
+  - name: Remove CSR files
+    file:
+      path: "{{ nginx_certs_path }}/{{ item }}.csr"
+      state: absent
+    loop: "{{ dns_names }}"
+
+  - name: Display self-signed certificate warning
+    debug:
+      msg: |
+        WARNING: Self-signed certificates have been generated for {{ dns_names | join(', ') }}.
+        These certificates are not trusted by browsers and should only be used for development/testing.
+        For production environments, please configure Vault or use proper CA-signed certificates.
+
+  when: not (vault_accessible | bool)
+
+- name: Ensure NGINX service is running
+  service:
+    name: nginx
+    state: started
+    enabled: yes
+
+- name: Reload NGINX
+  service:
+    name: nginx
+    state: reloaded
