@@ -1,38 +1,38 @@
 all:
   hosts:
     elastic-coordinating01.example.local:
-      ansible_host: 10.130.32.91
-      elastic_ip_address: 10.130.32.91
+      ansible_host: 192.168.1.91
+      elastic_ip_address: 192.168.1.91
       elasticsearch_jvm_xms: 4g 
       elasticsearch_jvm_xmx: 4g
     elastic-coordinating02.example.local:
-      ansible_host: 10.130.32.92
-      elastic_ip_address: 10.130.32.92
+      ansible_host: 192.168.1.92
+      elastic_ip_address: 192.168.1.92
       elasticsearch_jvm_xms: 4g 
       elasticsearch_jvm_xmx: 4g
     elastic-master01.example.local:
-      ansible_host: 10.130.32.93
-      elastic_ip_address: 10.130.32.93
+      ansible_host: 192.168.1.93
+      elastic_ip_address: 192.168.1.93
       elasticsearch_jvm_xms: 4g 
       elasticsearch_jvm_xmx: 4g
     elastic-master02.example.local:
-      ansible_host: 10.130.32.94
-      elastic_ip_address: 10.130.32.94
+      ansible_host: 192.168.1.94
+      elastic_ip_address: 192.168.1.94
       elasticsearch_jvm_xms: 4g 
       elasticsearch_jvm_xmx: 4g
     elastic-master03.example.local:
-      ansible_host: 10.130.32.95
-      elastic_ip_address: 10.130.32.95
+      ansible_host: 192.168.1.95
+      elastic_ip_address: 192.168.1.95
       elasticsearch_jvm_xms: 4g 
       elasticsearch_jvm_xmx: 4g
     elastic-data01.example.local:
-      ansible_host: 10.130.32.96
-      elastic_ip_address: 10.130.32.96
+      ansible_host: 192.168.1.96
+      elastic_ip_address: 192.168.1.96
       elasticsearch_jvm_xms: 4g 
       elasticsearch_jvm_xmx: 4g
     elastic-data02.example.local:
-      ansible_host: 10.130.32.97
-      elastic_ip_address: 10.130.32.97
+      ansible_host: 192.168.1.97
+      elastic_ip_address: 192.168.1.97
       elasticsearch_jvm_xms: 4g 
       elasticsearch_jvm_xmx: 4g
   children:
