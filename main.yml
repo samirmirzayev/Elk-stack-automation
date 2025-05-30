@@ -1,9 +1,9 @@
-# main.yaml
+# main.yml
 - name: Deploy ELK Stack
   hosts: all
   become: yes
 
   roles:
     - elasticsearch
-    - nginx
     - kibana
+    - nginx
