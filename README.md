@@ -297,7 +297,7 @@ elasticsearch_index_keep_days: "30d"
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/samirmirzayev/elasticsearch.git
+git clone https://github.com/samirmirzayev/Elk-stack-automation.git
 cd elasticsearch
 ```
 
@@ -574,8 +574,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🆘 Support
 
-- **GitHub Issues**: [https://github.com/samirmirzayev/elasticsearch/issues](https://github.com/samirmirzayev/elasticsearch/issues)
-- **Documentation**: [https://github.com/samirmirzayev/elasticsearch](https://github.com/samirmirzayev/elasticsearch)
+- **GitHub Issues**: [https://github.com/samirmirzayev/elasticsearch/issues](https://github.com/samirmirzayev/Elk-stack-automation/issues)
+- **Documentation**: [https://github.com/samirmirzayev/elasticsearch](https://github.com/samirmirzayev/Elk-stack-automation.git)
 
 ## 🏷 Tags
 
