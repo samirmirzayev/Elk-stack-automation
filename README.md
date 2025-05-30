@@ -1,7 +1,7 @@
-# Elasticsearch Ansible Role
+# Elasticsearch, Kibana and Nginx Ansible Role
 
-[![GitHub](https://img.shields.io/github/license/smraze96/elasticsearch)](https://github.com/smraze96/elasticsearch/blob/main/LICENSE)
-[![Ansible Galaxy](https://img.shields.io/badge/ansible--galaxy-elasticsearch-blue.svg)](https://galaxy.ansible.com/smraze96/elasticsearch)
+[![GitHub](https://img.shields.io/github/license/samirmirzayev/elasticsearch)](https://github.com/samirmirzayev/elasticsearch/blob/main/LICENSE)
+[![Ansible Galaxy](https://img.shields.io/badge/ansible--galaxy-elasticsearch-blue.svg)](https://galaxy.ansible.com/samirmirzayev/elasticsearch)
 
 A comprehensive Ansible role for deploying and managing Elasticsearch clusters on various operating systems. This role supports both Elasticsearch 8.x and 9.x versions with extensive configuration options.
 
@@ -297,7 +297,7 @@ elasticsearch_index_keep_days: "30d"
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/smraze96/elasticsearch.git
+git clone https://github.com/samirmirzayev/elasticsearch.git
 cd elasticsearch
 ```
 
@@ -574,8 +574,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🆘 Support
 
-- **GitHub Issues**: [https://github.com/smraze96/elasticsearch/issues](https://github.com/smraze96/elasticsearch/issues)
-- **Documentation**: [https://github.com/smraze96/elasticsearch](https://github.com/smraze96/elasticsearch)
+- **GitHub Issues**: [https://github.com/samirmirzayev/elasticsearch/issues](https://github.com/samirmirzayev/elasticsearch/issues)
+- **Documentation**: [https://github.com/samirmirzayev/elasticsearch](https://github.com/samirmirzayev/elasticsearch)
 
 ## 🏷 Tags
 
