@@ -102,50 +102,36 @@ all:
     elastic-coordinating01.example.local:
       ansible_host: 192.168.1.91
       elastic_ip_address: 192.168.1.91
-      elasticsearch_jvm_xms: 4g 
-      elasticsearch_jvm_xmx: 4g
       dns_names:
         - elastic-coordinating01.example.local
     elastic-coordinating02.example.local:
       ansible_host: 192.168.1.92
       elastic_ip_address: 192.168.1.92
-      elasticsearch_jvm_xms: 4g 
-      elasticsearch_jvm_xmx: 4g
       dns_names:
         - elastic-coordinating02.example.local
     elastic-master01.example.local:
       ansible_host: 192.168.1.93
       elastic_ip_address: 192.168.1.93
-      elasticsearch_jvm_xms: 4g 
-      elasticsearch_jvm_xmx: 4g
       dns_names:
         - elastic-master01.example.local
     elastic-master02.example.local:
       ansible_host: 192.168.1.94
       elastic_ip_address: 192.168.1.94
-      elasticsearch_jvm_xms: 4g 
-      elasticsearch_jvm_xmx: 4g
       dns_names:
         - elastic-master02.example.local
     elastic-master03.example.local:
       ansible_host: 192.168.1.95
       elastic_ip_address: 192.168.1.95
-      elasticsearch_jvm_xms: 4g 
-      elasticsearch_jvm_xmx: 4g
       dns_names:
         - elastic-master03.example.local
     elastic-data01.example.local:
       ansible_host: 192.168.1.96
       elastic_ip_address: 192.168.1.96
-      elasticsearch_jvm_xms: 4g 
-      elasticsearch_jvm_xmx: 4g
       dns_names:
         - elastic-data01.example.local
     elastic-data02.example.local:
       ansible_host: 192.168.1.97
       elastic_ip_address: 192.168.1.97
-      elasticsearch_jvm_xms: 4g 
-      elasticsearch_jvm_xmx: 4g
       dns_names:
         - elastic-data02.example.local
 
@@ -195,10 +181,10 @@ elasticsearch_https_enabled: yes
 elasticsearch_use_vault: false
 
 # Local Certificate Configuration (when not using Vault)
-elasticsearch_local_cert_country: "US"
-elasticsearch_local_cert_state: "California"
-elasticsearch_local_cert_locality: "San Francisco"
-elasticsearch_local_cert_organization: "Example Corp"
+elasticsearch_local_cert_country: "AZ"
+elasticsearch_local_cert_state: "BAKU"
+elasticsearch_local_cert_locality: "BAKU"
+elasticsearch_local_cert_organization: "IT"
 elasticsearch_local_cert_organizational_unit: "IT Department"
 
 # Local User Credentials (when not using Vault)
@@ -345,16 +331,16 @@ vault kv put secret/elasticsearch \
 
 ```bash
 # Syntax check
-ansible-playbook -i inventory/hosts.yml site.yml --syntax-check
+ansible-playbook -i inventory/hosts.yml main.yml --syntax-check
 
 # Dry run
-ansible-playbook -i inventory/hosts.yml site.yml --check
+ansible-playbook -i inventory/hosts.yml main.yml --check
 
 # Deploy
-ansible-playbook -i inventory/hosts.yml site.yml
+ansible-playbook -i inventory/hosts.yml main.yml
 
 # With specific tags
-ansible-playbook -i inventory/hosts.yml site.yml --tags="elasticsearch,install"
+ansible-playbook -i inventory/hosts.yml main.yml --tags="elasticsearch,install"
 ```
 
 ### Step 5: Verify Installation
